@@ -1,60 +1,57 @@
-import { getNumericDate, create, verify, dotenvConfig } from "../deps.ts";
-import type { Payload, Header } from "../deps.ts";
-import { convertToCryptoKey } from "./convertCryptoKey.ts";
-dotenvConfig({ export: true, path: ".env", safe: true });
+import { create, verify, getNumericDate, Payload, Header } from "https://deno.land/x/djwt@v3.0.2/mod.ts";
+import "jsr:@std/dotenv/load";
 
-export const signJwt = async ({
-  user_id,
-  issuer,
-  privateKeyPem,
-  expiresIn,
-}: {
-  user_id: string;
-  issuer: string;
-  privateKeyPem: "ACCESS_TOKEN_PRIVATE_KEY" | "REFRESH_TOKEN_PRIVATE_KEY";
-  expiresIn: Date;
-}) => {
-  const header: Header = {
-    alg: "RS256",
+const secretKey = Deno.env.get("ACCESS_TOKEN_PRIVATE_KEY") || "";
+if (!secretKey) {
+    throw new Error("ACCESS_TOKEN_PRIVATE_KEY is required");
+}
+const encoder = new TextEncoder()
+var keyBuf = encoder.encode(secretKey);
+
+var key = await crypto.subtle.importKey(
+    "raw",
+    keyBuf,
+    { name: "HMAC", hash: "SHA-256" },
+    true,
+    ["sign", "verify"],
+)
+
+const header: Header = {
+    alg: "HS256",
     typ: "JWT",
-  };
-
-  const nowInSeconds = Math.floor(Date.now() / 1000);
-  const tokenExpiresIn = getNumericDate(expiresIn);
-
-  const payload: Payload = {
-    iss: issuer,
-    iat: nowInSeconds,
-    exp: tokenExpiresIn,
-    sub: user_id,
-  };
-
-  const crytoPrivateKey = await convertToCryptoKey({
-    pemKey: atob(Deno.env.get(privateKeyPem) as unknown as string),
-    type: "PRIVATE",
-  });
-
-  const token = await create(header, payload, crytoPrivateKey!);
-
-  return { token };
+    foo: "bar"  // custom header
 };
+function addDays(date, days) {
+    const result = new Date(date); // 주어진 날짜로 새 Date 객체 생성
+    result.setDate(result.getDate() + days); // 날짜에 days를 더함
+    return result;
+}
 
-export const verifyJwt = async <T>({
-  token,
-  publicKeyPem,
-}: {
-  token: string;
-  publicKeyPem: "ACCESS_TOKEN_PUBLIC_KEY" | "REFRESH_TOKEN_PUBLIC_KEY";
-}): Promise<T | null> => {
-  try {
-    const crytoPublicKey = await convertToCryptoKey({
-      pemKey: atob(Deno.env.get(publicKeyPem) as unknown as string),
-      type: "PUBLIC",
-    });
+export async function createTokens(userId: string, tokenId: string, expDay: number) {
+    const issuer = "https://cocomarket.me"  //발급자
+    const iat = getNumericDate(new Date());  //발급시간
+    const day7 = addDays(new Date(), expDay);
+    const exp = getNumericDate(day7);  //만료시간
 
-    return (await verify(token, crytoPublicKey!)) as T;
-  } catch (error) {
-    console.log(error);
-    return null;
-  }
-};
+    const payload: Payload = {
+        iss: issuer,
+        iat: iat,
+        exp: exp,
+        sub: userId,  //user id
+        tokenId: tokenId, //token
+    };
+    const token = await create(header, payload, key)
+
+    return token;
+}
+
+export async function verifyToken(jwt: string) {
+    try {
+        const payload = await verify(jwt, key);
+        return payload;
+    }
+    catch (_e) {
+        const e: Error = _e;
+        console.log(e.message);
+    }
+}
